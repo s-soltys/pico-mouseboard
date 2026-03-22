@@ -1,11 +1,8 @@
-from machine import Pin
-import time
-
 from core.controls import BUTTON_ORDER, BUTTON_PINS
+from core.platform import DigitalInput, ticks_add, ticks_diff, ticks_ms
 
 
 class ButtonManager:
-    HOME_WINDOW_MS = 180
     REPEAT_DELAY_MS = 260
     REPEAT_INTERVAL_MS = 110
 
@@ -15,11 +12,9 @@ class ButtonManager:
         self._events = {}
         self._repeat_due = {}
         self._last_press_ms = {}
-        self._now_ms = time.ticks_ms()
-        self._home_triggered = False
-        self._home_latched = False
+        self._now_ms = ticks_ms()
         for name in BUTTON_ORDER:
-            self._pins[name] = Pin(BUTTON_PINS[name], Pin.IN, Pin.PULL_UP)
+            self._pins[name] = DigitalInput(BUTTON_PINS[name])
             self._current[name] = False
             self._events[name] = False
             self._repeat_due[name] = None
@@ -27,30 +22,21 @@ class ButtonManager:
 
     def update(self, now_ms=None):
         if now_ms is None:
-            now_ms = time.ticks_ms()
+            now_ms = ticks_ms()
         self._now_ms = now_ms
         for name in self._events:
             self._events[name] = False
 
         next_state = {}
         for name, pin in self._pins.items():
-            is_down = pin.value() == 0
+            is_down = pin.value() is False
             next_state[name] = is_down
             if is_down and not self._current[name]:
                 self._events[name] = True
                 self._last_press_ms[name] = now_ms
-                self._repeat_due[name] = time.ticks_add(now_ms, self.REPEAT_DELAY_MS)
+                self._repeat_due[name] = ticks_add(now_ms, self.REPEAT_DELAY_MS)
             elif not is_down:
                 self._repeat_due[name] = None
-
-        self._home_triggered = False
-        if next_state["A"] and next_state["B"]:
-            delta = abs(time.ticks_diff(self._last_press_ms["A"], self._last_press_ms["B"]))
-            if delta <= self.HOME_WINDOW_MS and not self._home_latched:
-                self._home_triggered = True
-                self._home_latched = True
-        else:
-            self._home_latched = False
 
         self._current = next_state
 
@@ -59,6 +45,26 @@ class ButtonManager:
 
     def pressed(self, name):
         return self._events.get(name, False)
+
+    def chord_down(self, *names):
+        names = self._normalize_names(names)
+        for name in names:
+            if not self.down(name):
+                return False
+        return bool(names)
+
+    def chord_pressed(self, *names):
+        names = self._normalize_names(names)
+        if not names:
+            return False
+
+        any_pressed = False
+        for name in names:
+            if not self.down(name):
+                return False
+            if self.pressed(name):
+                any_pressed = True
+        return any_pressed
 
     def repeat(self, name, delay_ms=None, interval_ms=None):
         if self.pressed(name):
@@ -75,21 +81,23 @@ class ButtonManager:
         if due is None:
             return False
 
-        first_due = time.ticks_add(self._last_press_ms[name], delay_ms)
-        if time.ticks_diff(due, first_due) > 0:
+        first_due = ticks_add(self._last_press_ms[name], delay_ms)
+        if ticks_diff(due, first_due) > 0:
             due = first_due
             self._repeat_due[name] = due
 
-        if time.ticks_diff(self._now_ms, due) >= 0:
-            self._repeat_due[name] = time.ticks_add(self._now_ms, interval_ms)
+        if ticks_diff(self._now_ms, due) >= 0:
+            self._repeat_due[name] = ticks_add(self._now_ms, interval_ms)
             return True
         return False
-
-    def home_triggered(self):
-        return self._home_triggered
 
     def any_down(self):
         for name in self._current:
             if self._current[name]:
                 return True
         return False
+
+    def _normalize_names(self, names):
+        if len(names) == 1 and isinstance(names[0], (tuple, list)):
+            names = tuple(names[0])
+        return tuple(names)

@@ -1,5 +1,6 @@
 BUTTON_PINS = {
     "UP": 2,
+    "CENTER": 3,
     "DOWN": 18,
     "LEFT": 16,
     "RIGHT": 20,
@@ -7,8 +8,7 @@ BUTTON_PINS = {
     "B": 17,
 }
 
-BUTTON_ORDER = ("UP", "DOWN", "LEFT", "RIGHT", "A", "B")
+BUTTON_ORDER = ("UP", "CENTER", "DOWN", "LEFT", "RIGHT", "A", "B")
 
-A_LABEL = "A"
-B_LABEL = "B"
-HOME_HINT = "A+B home"
+A_LABEL = "Top (A)"
+B_LABEL = "Bottom (B)"

@@ -1,123 +1,129 @@
-from machine import Pin
-import time
-
-from lcd import LCD_0inch96, BLACK, CYAN, WHITE, YELLOW, GRAY
-from core.controls import A_LABEL, B_LABEL
+from lcd import BLACK, CYAN, WHITE, YELLOW, GRAY, RED, GREEN
 from core.buttons import ButtonManager
-from core.ui import draw_header, draw_footer, draw_tile, center_x, HOME_HINT
-from apps import build_apps
+from core.display import get_lcd, show_fatal_error
+from core.ui import center_x, fit_text
+from core.platform import sleep
+from apps.hid_tools_app import HIDToolsApp
 
 
 class Launcher:
+    LOG_HISTORY_LIMIT = 8
+
     def __init__(self):
-        self.lcd = LCD_0inch96()
-        self.buttons = ButtonManager()
-        self.apps = build_apps()
-        self.selected_index = 0
-        self.active_app = None
-        self.led = None
+        self.lcd = None
+        self.buttons = None
+        self.controller = None
+        self.error_stage = "boot"
+        self._boot_status = ""
+        self._boot_detail = ""
+        self._last_lcd_report = None
+        self._log_history = []
+
+    def log(self, message):
+        text = str(message)
+        self._log_history.append(text)
+        if len(self._log_history) > self.LOG_HISTORY_LIMIT:
+            self._log_history.pop(0)
         try:
-            self.led = Pin("LED", Pin.OUT)
-            self.led.on()
+            print("[mouseboard]", text)
         except Exception:
-            self.led = None
+            pass
 
-    def app_count(self):
-        return len(self.apps)
-
-    def page_count(self):
-        return (self.app_count() + 3) // 4
-
-    def current_page(self):
-        return self.selected_index // 4
-
-    def open_app(self, index):
-        if index < 0 or index >= len(self.apps):
+    def report_lcd(self, *lines):
+        report = tuple(line for line in lines if line)
+        if report == self._last_lcd_report:
             return
-        self.active_app = self.apps[index]
-        if hasattr(self.active_app, "on_open"):
-            self.active_app.on_open(self)
+        self._last_lcd_report = report
+        if report:
+            self.log("LCD: " + " | ".join(report))
 
-    def go_home(self):
-        if self.active_app and hasattr(self.active_app, "on_close"):
-            self.active_app.on_close(self)
-        self.active_app = None
-
-    def move_selection(self, delta):
-        new_index = self.selected_index + delta
-        if 0 <= new_index < len(self.apps):
-            self.selected_index = new_index
-
-    def next_page(self):
-        if self.page_count() <= 1:
+    def _draw_boot(self, status="", detail="", color=YELLOW):
+        if self.lcd is None:
             return
-        page = (self.current_page() + 1) % self.page_count()
-        self.selected_index = min(len(self.apps) - 1, page * 4)
+
+        status = fit_text(status, 19)
+        detail = fit_text(detail, 19)
+
+        self.lcd.fill(BLACK)
+        self.lcd.text("PICO", center_x("PICO"), 8, CYAN)
+        self.lcd.text("MOUSEBOARD", center_x("MOUSEBOARD"), 22, WHITE)
+        self.lcd.text("keyboard + mouse", center_x("keyboard + mouse"), 36, YELLOW)
+        if status:
+            self.lcd.text(status, center_x(status), 52, color)
+        if detail:
+            self.lcd.text(detail, center_x(detail), 64, GRAY)
+        self.report_lcd("BOOT", status, detail)
+        self.lcd.display()
+
+    def set_boot_status(self, status, detail="", color=YELLOW, delay=0):
+        self._boot_status = status
+        self._boot_detail = detail
+        if detail:
+            self.log("boot stage: " + status + " | " + detail)
+        else:
+            self.log("boot stage: " + status)
+        self._draw_boot(status, detail, color)
+        if delay:
+            sleep(delay)
+
+    def show_error(self, exc, stage="runtime"):
+        message = str(exc) or exc.__class__.__name__
+        self.log(stage + " error: " + exc.__class__.__name__ + ": " + message)
+        detail = ""
+        if stage == "boot":
+            detail = self._boot_detail or self._boot_status or "startup"
+
+        try:
+            if self.lcd is None:
+                self.lcd = get_lcd()
+            show_fatal_error(
+                exc,
+                stage=stage,
+                detail=detail,
+                log_lines=self._log_history,
+                lcd=self.lcd,
+            )
+            title = "boot error" if stage == "boot" else "runtime error"
+            line1 = fit_text(detail or exc.__class__.__name__, 19)
+            line2 = fit_text(message, 19)
+            self.report_lcd(title, line1, line2)
+        except Exception as screen_exc:
+            self.log("error screen failed: " + repr(screen_exc))
+
+    def initialize(self):
+        self.error_stage = "boot"
+        self.log("boot start")
+        self.log("init lcd")
+        self.lcd = get_lcd()
+        self.set_boot_status("lcd ready", "init buttons", CYAN, 0.15)
+
+        self.buttons = ButtonManager()
+        self.set_boot_status("buttons ready", "init controller", CYAN, 0.15)
+
+        self.controller = HIDToolsApp()
+        self.set_boot_status("controller ready", "open HID", CYAN, 0.15)
 
     def draw_boot(self):
-        self.lcd.fill(BLACK)
-        self.lcd.text("PICO", center_x("PICO"), 18, CYAN)
-        self.lcd.text("LAUNCHER", center_x("LAUNCHER"), 32, WHITE)
-        self.lcd.text("Pico 2 W", center_x("Pico 2 W"), 48, YELLOW)
-        self.lcd.text(A_LABEL + " page", 20, 56, GRAY)
-        self.lcd.text(B_LABEL + " open", 84, 56, GRAY)
-        self.lcd.text(HOME_HINT, 20, 66, GRAY)
-        self.lcd.display()
-        time.sleep(0.7)
-
-    def draw_home(self):
-        self.lcd.fill(BLACK)
-        detail = str(self.current_page() + 1) + "/" + str(self.page_count())
-        draw_header(self.lcd, "Launcher", detail, WHITE)
-
-        start = self.current_page() * 4
-        layout = [
-            (2, 13),
-            (81, 13),
-            (2, 42),
-            (81, 42),
-        ]
-
-        for offset, app in enumerate(self.apps[start:start + 4]):
-            x, y = layout[offset]
-            is_selected = (start + offset) == self.selected_index
-            draw_tile(self.lcd, x, y, 77, 27, app.title, is_selected, app.accent, app.draw_icon, True)
-
-        draw_footer(self.lcd, A_LABEL + " page", WHITE)
-        self.lcd.text(B_LABEL + " open", 80, 71, WHITE)
-
-    def step_home(self):
-        if self.buttons.down("A") and self.buttons.down("B"):
-            self.draw_home()
-            return
-        if self.buttons.repeat("LEFT"):
-            self.move_selection(-1)
-        if self.buttons.repeat("RIGHT"):
-            self.move_selection(1)
-        if self.buttons.repeat("UP"):
-            self.move_selection(-2)
-        if self.buttons.repeat("DOWN"):
-            self.move_selection(2)
-        if self.buttons.pressed("A"):
-            self.next_page()
-        if self.buttons.pressed("B"):
-            self.open_app(self.selected_index)
-        self.draw_home()
+        status = self._boot_status or "starting"
+        detail = self._boot_detail or "please wait"
+        self._draw_boot(status, detail, YELLOW)
+        sleep(0.35)
 
     def run(self):
+        self.initialize()
         self.draw_boot()
+        self.log("opening HID controller")
+        self.controller.on_open(self)
+        ready_color = RED if self.controller.status == "hid off" else GREEN
+        ready_detail = self.controller.hid_detail or self.controller.status
+        self.set_boot_status("ready", ready_detail, ready_color, 0.2)
+        self.log("enter frame loop")
+        self.error_stage = "runtime"
         while True:
             self.buttons.update()
-            if self.active_app is None:
-                self.step_home()
-            else:
-                if self.buttons.home_triggered():
-                    self.go_home()
-                    self.draw_home()
-                else:
-                    action = self.active_app.step(self)
-                    if action == "home":
-                        self.go_home()
-                        self.draw_home()
+            self.controller.step(self)
             self.lcd.display()
-            time.sleep(0.03)
+            sleep(0.03)
+
+
+Mouseboard = Launcher
