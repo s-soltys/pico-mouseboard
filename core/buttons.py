@@ -46,26 +46,6 @@ class ButtonManager:
     def pressed(self, name):
         return self._events.get(name, False)
 
-    def chord_down(self, *names):
-        names = self._normalize_names(names)
-        for name in names:
-            if not self.down(name):
-                return False
-        return bool(names)
-
-    def chord_pressed(self, *names):
-        names = self._normalize_names(names)
-        if not names:
-            return False
-
-        any_pressed = False
-        for name in names:
-            if not self.down(name):
-                return False
-            if self.pressed(name):
-                any_pressed = True
-        return any_pressed
-
     def repeat(self, name, delay_ms=None, interval_ms=None):
         if self.pressed(name):
             return True
@@ -90,14 +70,3 @@ class ButtonManager:
             self._repeat_due[name] = ticks_add(self._now_ms, interval_ms)
             return True
         return False
-
-    def any_down(self):
-        for name in self._current:
-            if self._current[name]:
-                return True
-        return False
-
-    def _normalize_names(self, names):
-        if len(names) == 1 and isinstance(names[0], (tuple, list)):
-            names = tuple(names[0])
-        return tuple(names)

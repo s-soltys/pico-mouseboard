@@ -43,25 +43,29 @@ def show_exception_on_lcd(exc, stage="runtime", runtime=None):
             log("runtime error screen failed: " + repr(screen_exc))
     try:
         from core.display import show_fatal_error
+
         show_fatal_error(exc, stage=stage, log_lines=_log_history)
     except Exception as display_exc:
         log("panic LCD unavailable: " + repr(display_exc))
 
 
-runtime = None
-try:
+def run():
+    runtime = None
     try:
-        from core.launcher import Mouseboard as Runtime
-    except ImportError:
-        from core.launcher import Launcher as Runtime
-    log("starting runtime")
-    runtime = Runtime()
-    runtime.run()
-except KeyboardInterrupt:
-    log("stopped by keyboard interrupt")
-    raise
-except Exception as exc:
-    log("fatal: " + exc.__class__.__name__)
-    print_exception(exc)
-    show_exception_on_lcd(exc, getattr(runtime, "error_stage", "boot"), runtime)
-    log("runtime halted")
+        from core.launcher import Mouseboard
+
+        log("starting runtime")
+        runtime = Mouseboard()
+        runtime.run()
+    except KeyboardInterrupt:
+        log("stopped by keyboard interrupt")
+        raise
+    except Exception as exc:
+        log("fatal: " + exc.__class__.__name__)
+        print_exception(exc)
+        show_exception_on_lcd(exc, getattr(runtime, "error_stage", "boot"), runtime)
+        log("runtime halted")
+
+
+if __name__ == "__main__":
+    run()

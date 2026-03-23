@@ -10,5 +10,6 @@ BUTTON_PINS = {
 
 BUTTON_ORDER = ("UP", "CENTER", "DOWN", "LEFT", "RIGHT", "A", "B")
 
-A_LABEL = "Top (A)"
-B_LABEL = "Bottom (B)"
+A_LABEL = "A"
+B_LABEL = "B"
+CENTER_LABEL = "Stick"

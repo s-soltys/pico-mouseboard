@@ -1,18 +1,22 @@
-from lcd import BLACK, CYAN, WHITE, YELLOW, GRAY, RED, GREEN
+from lcd import BLACK, CYAN, WHITE, YELLOW, GRAY, RED
+from apps.self_test_app import SelfTestApp
+from apps.mouse_app import MouseApp
+from apps.usb_diag_app import UsbDiagApp
 from core.buttons import ButtonManager
+from core.boot_mode import DEFAULT_BOOT_MODE, detect_boot_mode
 from core.display import get_lcd, show_fatal_error
 from core.ui import center_x, fit_text
 from core.platform import sleep
-from apps.hid_tools_app import HIDToolsApp
 
 
-class Launcher:
+class Mouseboard:
     LOG_HISTORY_LIMIT = 8
 
     def __init__(self):
         self.lcd = None
         self.buttons = None
         self.controller = None
+        self.boot_mode = DEFAULT_BOOT_MODE
         self.error_stage = "boot"
         self._boot_status = ""
         self._boot_detail = ""
@@ -47,7 +51,7 @@ class Launcher:
         self.lcd.fill(BLACK)
         self.lcd.text("PICO", center_x("PICO"), 8, CYAN)
         self.lcd.text("MOUSEBOARD", center_x("MOUSEBOARD"), 22, WHITE)
-        self.lcd.text("keyboard + mouse", center_x("keyboard + mouse"), 36, YELLOW)
+        self.lcd.text("usb mouse", center_x("usb mouse"), 36, YELLOW)
         if status:
             self.lcd.text(status, center_x(status), 52, color)
         if detail:
@@ -98,32 +102,51 @@ class Launcher:
         self.set_boot_status("lcd ready", "init buttons", CYAN, 0.15)
 
         self.buttons = ButtonManager()
-        self.set_boot_status("buttons ready", "init controller", CYAN, 0.15)
+        self.buttons.update()
+        self.boot_mode = detect_boot_mode(DEFAULT_BOOT_MODE)
+        self.log("boot mode: " + self.boot_mode)
 
-        self.controller = HIDToolsApp()
-        self.set_boot_status("controller ready", "open HID", CYAN, 0.15)
+        if self.boot_mode == "self_test":
+            self.set_boot_status("buttons ready", "init self test", CYAN, 0.15)
+            self.controller = SelfTestApp()
+            self.set_boot_status("self test", "press all inputs", CYAN, 0.15)
+            return
 
-    def draw_boot(self):
-        status = self._boot_status or "starting"
-        detail = self._boot_detail or "please wait"
-        self._draw_boot(status, detail, YELLOW)
-        sleep(0.35)
+        if self.boot_mode == "usb_diag":
+            self.set_boot_status("buttons ready", "init USB diag", CYAN, 0.15)
+            self.controller = UsbDiagApp()
+            self.set_boot_status("diag ready", "probe USB", CYAN, 0.15)
+            return
+
+        self.set_boot_status("buttons ready", "init mouse app", CYAN, 0.15)
+        self.controller = MouseApp()
+        self.set_boot_status("app ready", "open USB mouse", CYAN, 0.15)
+
+    def _open_usb_diag(self, reason=""):
+        previous = self.controller
+        if reason:
+            self.log("open USB diag: " + reason)
+        if previous is not None and hasattr(previous, "on_close"):
+            try:
+                previous.on_close(self)
+            except Exception as exc:
+                self.log("close before diag failed: " + repr(exc))
+        self.controller = UsbDiagApp()
+        self.controller.on_open(self)
 
     def run(self):
         self.initialize()
-        self.draw_boot()
-        self.log("opening HID controller")
-        self.controller.on_open(self)
-        ready_color = RED if self.controller.status == "hid off" else GREEN
-        ready_detail = self.controller.hid_detail or self.controller.status
-        self.set_boot_status("ready", ready_detail, ready_color, 0.2)
-        self.log("enter frame loop")
+        opened = self.controller.on_open(self)
+        if not opened and isinstance(self.controller, MouseApp):
+            self._open_usb_diag(getattr(self.controller, "hid_detail", "") or "mouse open failed")
+        sleep(0.25)
         self.error_stage = "runtime"
+        self.log("enter frame loop")
         while True:
             self.buttons.update()
             self.controller.step(self)
+            if isinstance(self.controller, MouseApp) and self.controller.wants_debug_mode():
+                self._open_usb_diag(self.controller.debug_reason())
+                continue
             self.lcd.display()
             sleep(0.03)
-
-
-Mouseboard = Launcher

@@ -10,11 +10,12 @@ FOOTER_H = 10
 def fit_text(text, max_chars):
     if text is None:
         return ""
+    text = str(text)
     if len(text) <= max_chars:
         return text
     if max_chars <= 1:
         return text[:max_chars]
-    return text[:max_chars - 1] + "."
+    return text[: max_chars - 1] + "."
 
 
 def center_x(text, width=SCREEN_W):
