@@ -5,99 +5,78 @@ MicroPython USB mouse controller for Raspberry Pi Pico 2 with the Waveshare Pico
 Hardware reference:
 - https://www.waveshare.com/wiki/Pico-LCD-0.96
 
+## Current Status
+
+The board now boots and works as a USB mouse with:
+- joystick directions mapped to cursor movement
+- `A` mapped to left click
+- `B` mapped to right click
+- joystick press toggling two speed modes
+
+Current speed steps:
+- `slow`: `10`
+- `fast`: `20`
+
 ## Boot Modes
 
-This build now supports three explicit modes:
-- `mouse`: normal USB HID mouse mode
-- `usb_diag`: inspect firmware and USB state without claiming HID at runtime
-- `self_test`: verify every board input without touching USB HID
-
-Boot selection:
+There are three boot modes:
 - normal reset: `mouse`
 - hold `A` during reset or power-up: `usb_diag`
 - hold `B` during reset or power-up: `self_test`
 
-## Mouse Controls
-
-In `mouse` mode:
-- joystick directions move the host cursor
-- `A` sends left mouse button
-- `B` sends right mouse button
-- joystick press toggles slow and fast cursor speed
-
-The LCD shows:
-- startup progress and USB mouse status
-- operating instructions
-- live movement and button state visualization
-- HID or runtime errors
-
-## USB Support
-
-The Pico is intended to enumerate as a generic USB mouse on macOS, Windows, and Linux by using MicroPython's `usb.device.mouse` interface.
-
-`boot.py` is the primary HID claim path. On a normal mouse boot it claims the USB interface as early as possible. If you force `usb_diag` or `self_test`, `boot.py` skips HID claim so those modes can inspect the system without also changing USB state.
-
-The app runtime only attempts a fallback HID claim when `boot.py` did not already run the mouse setup path.
-
-Required firmware support:
-- `machine.USBDevice` support enabled in firmware
-
-The repo vendors the `usb.device` runtime core plus the mouse and HID helper modules, so a separate `mip install` step is not required.
-
-If the LCD reports `usb.device missing`, the vendored `usb/` package is probably missing from the board. If it reports `usb mouse pkg missing`, then the vendored `vendor/` files were not copied to the board.
-
-## Bring-Up Workflow
-
-Use this order after flashing or after major USB changes:
-
-1. Flash a recent Pico 2 MicroPython firmware with USB device support.
-2. Copy `boot.py`, `main.py`, `screentest.py`, `lcd.py`, `core/`, `apps/`, `usb/`, and `vendor/` to the board.
-3. Reset while holding `B` and confirm `self_test` sees every input: `UP`, `DOWN`, `LEFT`, `RIGHT`, `CENTER`, `A`, `B`.
-4. Reset while holding `A` and confirm `usb_diag` sees the expected firmware and USB capabilities.
-5. Reset normally into `mouse` mode and test host enumeration.
-
-If USB mouse startup fails, the device automatically falls back to `usb_diag`.
-
-## USB Diagnostics
-
-Controls:
-- `CENTER`: rescan USB state
-
-The screen shows:
-- whether boot-time HID setup was attempted and whether it succeeded
-- whether `usb.device`, `usb.device.mouse`, and `machine.USBDevice` are present
-- whether `usb.device.get()` returns a device object
-- whether HID is already claimed and from which path
-- whether a zero-motion report can be queued
-- firmware/platform info
-
-Interpret the results like this:
-- `usb.device missing`: vendored `usb/` files did not deploy, or import failed
-- `mouse pkg missing`: vendored USB helper files did not deploy
-- `boot skipped`: expected when you forced `usb_diag` or `self_test`
-- `usb dev no` on a cold boot with no REPL attached: firmware or board USB support problem, not app logic
-- `claim boot failed`: `boot.py` ran but HID setup failed before the app started
-- `claim runtime claimed`: boot-time HID was skipped and the app manually claimed USB later
-- `report send failed`: the HID interface exists but no report could be queued
-- `init failed: ...`: capture the exact exception text from the LCD or serial log and debug that next
-
-## Files
-
-- `main.py`: MicroPython entrypoint for the mouse runtime
-- `boot.py`: early USB mouse initialization for cold boots
-- `screentest.py`: convenience wrapper that launches the same runtime manually
-- `lcd.py`: Waveshare Pico-LCD-0.96 driver
-- `core/`: shared platform, display, buttons, HID, boot mode, and runtime glue
-- `apps/mouse_app.py`: mouse input handling and LCD UI
-- `apps/self_test_app.py`: raw input verification
-- `apps/usb_diag_app.py`: on-device USB diagnostics mode
-- `usb/`: vendored `usb.device` runtime support package
-- `vendor/`: vendored USB HID/mouse helper modules
+Mode summary:
+- `mouse`: normal USB mouse runtime
+- `usb_diag`: single-screen USB/HID diagnostics, `CENTER` rescans
+- `self_test`: raw input test for all buttons and joystick directions
 
 ## Deploying
 
-1. Flash a recent Pico 2 MicroPython firmware with USB device support.
-2. Copy `boot.py`, `main.py`, `screentest.py`, `lcd.py`, `core/`, `apps/`, `usb/`, and `vendor/` to the board.
-3. Reboot the Pico.
+1. Flash a recent official Pico 2 MicroPython UF2 with `machine.USBDevice` support.
+2. Copy these files and folders to the board:
+   `boot.py`, `main.py`, `screentest.py`, `lcd.py`, `core/`, `apps/`, `usb/`, `vendor/`
+3. Hard reset or unplug/replug the board.
+4. Close any attached REPL/editor before testing mouse mode.
 
-After the first deploy, do a real reset or unplug/replug once so `boot.py` can claim USB during startup. If the board is started from an attached REPL or editor session and the LCD still shows `usb device unavailable`, close the REPL tool and reset again so MicroPython can reopen USB as a mouse.
+The `usb/` and `vendor/` folders are required. The project vendors the runtime USB support it needs, so no separate `mip install` step is expected.
+
+## Bring-Up Checklist
+
+Use this order after flashing or after USB/input changes:
+
+1. Boot with `B` held and confirm `self_test` sees `UP`, `DOWN`, `LEFT`, `RIGHT`, `CENTER`, `A`, and `B`.
+2. Boot with `A` held and confirm `usb_diag` shows:
+   `boot ready yes`, `usb.device ok`, `mouse src ...`, `hid ready yes`
+3. Boot normally and verify:
+   the LCD shows the mouse screen, movement updates on-screen, and the host sees a working USB mouse.
+
+If mouse mode fails to open HID, the runtime falls back to `usb_diag`.
+
+## Diagnostics
+
+`usb_diag` is intentionally one screen only. It shows the main USB/HID state in six short lines and avoids paging.
+
+Useful readings:
+- `usb.device missing`: the `usb/` package did not deploy, or import failed
+- `mouse pkg missing`: the `vendor/` package did not deploy
+- `boot ready skip`: expected if you intentionally forced `usb_diag`
+- `usb device unavailable`: runtime USB device object could not be opened
+- `claim boot failed`: `boot.py` tried to claim HID and failed
+- `hid ready no`: the mouse interface is still not usable
+
+## Notes
+
+- Input pins are active-low. If the LCD does not react to controls, check `self_test` first.
+- `boot.py` is the primary HID claim path. Normal mouse boots should claim USB there, not later in the app.
+- An attached REPL can interfere with USB enumeration. If HID behaves inconsistently, disconnect the REPL and hard reset.
+
+## Files
+
+- `main.py`: runtime entrypoint
+- `boot.py`: early USB mouse setup
+- `lcd.py`: display driver for the Waveshare Pico-LCD-0.96
+- `apps/mouse_app.py`: mouse UI and input-to-HID behavior
+- `apps/self_test_app.py`: raw input verification
+- `apps/usb_diag_app.py`: single-screen USB diagnostics
+- `core/`: platform, launcher, controls, buttons, display, HID, boot-mode glue
+- `usb/`: vendored `usb.device` runtime package
+- `vendor/`: vendored HID/mouse helpers
