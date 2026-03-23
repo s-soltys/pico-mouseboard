@@ -1,6 +1,8 @@
 USB_IMPORT_ERROR = None
 MOUSE_IMPORT_ERROR = None
+KEYBOARD_IMPORT_ERROR = None
 MOUSE_SOURCE = ""
+KEYBOARD_SOURCE = ""
 
 try:
     import usb.device
@@ -18,11 +20,23 @@ else:
         except ImportError:
             MouseInterface = None
             MOUSE_IMPORT_ERROR = "usb mouse pkg missing"
+    try:
+        from usb.device.keyboard import KeyboardInterface
+        KEYBOARD_SOURCE = "usb.device.keyboard"
+    except ImportError:
+        try:
+            from vendor.usb_keyboard import KeyboardInterface
+            KEYBOARD_SOURCE = "vendor.usb_keyboard"
+        except ImportError:
+            KeyboardInterface = None
+            KEYBOARD_IMPORT_ERROR = "usb keyboard pkg missing"
 
 if usb is None:
     MouseInterface = None
+    KeyboardInterface = None
 
 _boot_mouse = None
+_boot_keyboard = None
 _boot_attempted = False
 _boot_ready = False
 _boot_error = ""
@@ -55,6 +69,15 @@ def mouse():
     return _boot_mouse
 
 
+def keyboard():
+    global _boot_keyboard
+    if KeyboardInterface is None:
+        return None
+    if _boot_keyboard is None:
+        _boot_keyboard = KeyboardInterface()
+    return _boot_keyboard
+
+
 def boot_ready():
     return _boot_ready
 
@@ -75,7 +98,7 @@ def claim_source():
     return "not claimed"
 
 
-def configure_mouse(source="boot"):
+def configure_hid(source="boot"):
     global _boot_attempted, _boot_ready, _boot_error, _claim_source
 
     _boot_attempted = True
@@ -93,20 +116,27 @@ def configure_mouse(source="boot"):
         _claim_source = source + " failed"
         return False
 
-    iface = mouse()
-    if iface is None:
+    mouse_iface = mouse()
+    if mouse_iface is None:
         _boot_ready = False
         _boot_error = MOUSE_IMPORT_ERROR or "mouse unavailable"
         _claim_source = "firmware unsupported"
         return False
 
-    if _boot_ready and _boot_mouse is iface:
+    keyboard_iface = keyboard()
+    if keyboard_iface is None:
+        _boot_ready = False
+        _boot_error = KEYBOARD_IMPORT_ERROR or "keyboard unavailable"
+        _claim_source = "firmware unsupported"
+        return False
+
+    if _boot_ready and _boot_mouse is mouse_iface and _boot_keyboard is keyboard_iface:
         if not _claim_source:
             _claim_source = source + " claimed"
         return True
 
     try:
-        dev.init(iface, builtin_driver=True)
+        dev.init(mouse_iface, keyboard_iface, builtin_driver=True)
     except Exception as exc:
         _boot_ready = False
         _boot_error = format_exception("init failed: ", exc)
@@ -117,3 +147,7 @@ def configure_mouse(source="boot"):
     _boot_error = ""
     _claim_source = source + " claimed"
     return True
+
+
+def configure_mouse(source="boot"):
+    return configure_hid(source)

@@ -57,7 +57,7 @@ class Mouseboard:
         self.lcd.fill(BLACK)
         self.lcd.text("PICO", center_x("PICO"), 8, CYAN)
         self.lcd.text("MOUSEBOARD", center_x("MOUSEBOARD"), 22, WHITE)
-        self.lcd.text("usb mouse", center_x("usb mouse"), 36, YELLOW)
+        self.lcd.text("usb hid", center_x("usb hid"), 36, YELLOW)
         if status:
             self.lcd.text(status, center_x(status), 52, color)
         if detail:
@@ -124,9 +124,9 @@ class Mouseboard:
             self.set_boot_status("diag ready", "probe USB", CYAN, 0.15)
             return
 
-        self.set_boot_status("buttons ready", "init mouse app", CYAN, 0.15)
+        self.set_boot_status("buttons ready", "init HID app", CYAN, 0.15)
         self.controller = MouseApp()
-        self.set_boot_status("app ready", "open USB mouse", CYAN, 0.15)
+        self.set_boot_status("app ready", "open USB HID", CYAN, 0.15)
 
     def _open_usb_diag(self, reason=""):
         previous = self.controller
