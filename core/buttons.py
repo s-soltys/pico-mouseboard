@@ -29,7 +29,8 @@ class ButtonManager:
 
         next_state = {}
         for name, pin in self._pins.items():
-            is_down = pin.value() is False
+            # The Waveshare buttons are active-low; Pin.value() returns 0/1.
+            is_down = pin.value() == 0
             next_state[name] = is_down
             if is_down and not self._current[name]:
                 self._events[name] = True

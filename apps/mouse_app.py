@@ -6,8 +6,8 @@ from core.ui import draw_header, draw_footer, fit_text
 
 
 SPEEDS = (
-    ("slow", 3),
-    ("fast", 7),
+    ("slow", 15),
+    ("fast", 30),
 )
 
 OPEN_RETRY_MS = 1200
