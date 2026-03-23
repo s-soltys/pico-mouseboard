@@ -10,13 +10,13 @@ from core.ui import draw_header, draw_footer, fit_text
 # (label, base_pixels_per_second, max_pixels_per_second).
 SPEEDS = (
     ("slow", 260, 520),
-    ("fast", 420, 860),
+    ("fast", 840, 1720),
 )
 
 OPEN_RETRY_MS = 1200
 OPEN_RETRY_STEP_MS = 120
 MAX_MOTION_ELAPSED_MS = 40
-MAX_REPORT_DELTA = 8
+MAX_REPORT_DELTA = 10
 ACCEL_START_MS = 120
 ACCEL_RAMP_MS = 420
 
