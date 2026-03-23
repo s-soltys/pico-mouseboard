@@ -11,8 +11,8 @@ The board now boots as a composite USB mouse + keyboard device with:
 - joystick directions mapped to cursor movement
 - `A` mapped to left click
 - `B` mapped to right click
-- joystick press toggling two speed modes
-- `A+B` toggling between mouse mode and keyboard mode
+- short joystick press toggling two speed modes in mouse mode
+- holding the joystick for at least 0.5 seconds toggling between mouse mode and keyboard mode
 - keyboard mode using the joystick to move selection, `A` to send the selected key, and `B` to cycle pages
 
 Keyboard pages:
@@ -54,7 +54,7 @@ Use this order after flashing or after USB/input changes:
 2. Boot with `A` held and confirm `usb_diag` shows:
    `boot ready yes`, `usb.device ok`, `mouse src ...`, `kbd src ...`, `hid M/K yy`
 3. Boot normally and verify:
-   the LCD shows the mouse screen, movement updates on-screen, the host sees a working USB mouse, and `A+B` opens the keyboard screen where `A` types the selected key.
+   the LCD shows the mouse screen, movement updates on-screen, the host sees a working USB mouse, and holding the joystick for at least 1 second opens the keyboard screen where `A` types the selected key.
 
 If normal runtime fails to open HID, the app falls back to `usb_diag`.
 

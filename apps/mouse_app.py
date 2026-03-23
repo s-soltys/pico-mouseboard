@@ -34,14 +34,15 @@ TILE_A_X = 86
 TILE_B_X = 110
 TILE_C_X = 134
 
-KEYBOARD_GRID_X = 10
-KEYBOARD_GRID_Y = 14
-KEYBOARD_COL_W = 28
-KEYBOARD_ROW_H = 9
+KEYBOARD_GRID_X = 2
+KEYBOARD_GRID_Y = 2
+KEYBOARD_COL_W = 30
+KEYBOARD_ROW_H = 10
 
 MODE_MOUSE = "mouse"
 MODE_KEYBOARD = "keyboard"
 KEYBOARD_SHIFT = 0x02
+MODE_SWITCH_HOLD_MS = 500
 
 KEYCODE_A = 4
 KEYCODE_1 = 30
@@ -181,8 +182,8 @@ class MouseApp:
         self._move_dir_y = 0
         self._move_hold_x_ms = 0
         self._move_hold_y_ms = 0
-        self._mode_switch_latch = False
-        self._mode_switch_release = False
+        self._center_hold_started_ms = None
+        self._center_hold_triggered = False
 
     def _log(self, message):
         if self.runtime is not None and hasattr(self.runtime, "log"):
@@ -383,22 +384,29 @@ class MouseApp:
         self.keyboard_row = next_row
         self.keyboard_col = next_col
 
-    def _handle_mode_toggle(self, buttons):
-        if self._mode_switch_release:
-            if not buttons.down("A") and not buttons.down("B"):
-                self._mode_switch_release = False
-                self._mode_switch_latch = False
-            return True
+    def _handle_center_button(self, buttons, now_ms):
+        if buttons.down("CENTER"):
+            if self._center_hold_started_ms is None:
+                self._center_hold_started_ms = now_ms
+                self._center_hold_triggered = False
+                return None
+            if self._center_hold_triggered:
+                return "hold"
+            if ticks_diff(now_ms, self._center_hold_started_ms) >= MODE_SWITCH_HOLD_MS:
+                self._center_hold_triggered = True
+                self._toggle_input_mode()
+                return "toggle"
+            return None
 
-        chord_down = buttons.down("A") and buttons.down("B")
-        if chord_down and not self._mode_switch_latch:
-            self._mode_switch_latch = True
-            self._mode_switch_release = True
-            self._toggle_input_mode()
-            return True
-        if not chord_down:
-            self._mode_switch_latch = False
-        return chord_down
+        if self._center_hold_started_ms is None:
+            return None
+
+        hold_triggered = self._center_hold_triggered
+        self._center_hold_started_ms = None
+        self._center_hold_triggered = False
+        if not hold_triggered and self.input_mode == MODE_MOUSE:
+            return "short"
+        return None
 
     def on_open(self, runtime):
         self.runtime = runtime
@@ -413,8 +421,8 @@ class MouseApp:
         self.keyboard_page_index = 0
         self.keyboard_row = 0
         self.keyboard_col = 0
-        self._mode_switch_latch = False
-        self._mode_switch_release = False
+        self._center_hold_started_ms = None
+        self._center_hold_triggered = False
         self._reset_motion_state(getattr(runtime, "now_ms", ticks_ms()))
 
         self._set_boot_status("open USB", "mouse+kbd", CYAN)
@@ -558,7 +566,7 @@ class MouseApp:
 
         lcd.text("A left", 82, 38, WHITE)
         lcd.text("B right", 82, 48, WHITE)
-        lcd.text("A+B keys", 82, 58, WHITE)
+        lcd.text("Stick 1s", 82, 58, WHITE)
 
         footer = "Stick speed " + self._speed_name()
         draw_footer(lcd, footer, GRAY)
@@ -570,8 +578,8 @@ class MouseApp:
         )
 
     def _draw_keyboard_cell(self, lcd, x, y, entry, selected):
-        width = KEYBOARD_COL_W - 2
-        height = KEYBOARD_ROW_H - 1
+        width = KEYBOARD_COL_W - 1
+        height = KEYBOARD_ROW_H
         border = YELLOW if entry["special"] else WHITE
         if selected:
             lcd.fill_rect(x, y, width, height, CYAN)
@@ -587,7 +595,6 @@ class MouseApp:
         lcd.text(label, text_x, y + 1, text_color)
 
     def _draw_keyboard(self, lcd):
-        draw_header(lcd, "Keyboard", self._keyboard_page_name(), GREEN)
         for row_index, row in enumerate(self._keyboard_rows()):
             y = KEYBOARD_GRID_Y + (row_index * KEYBOARD_ROW_H)
             row_x = KEYBOARD_GRID_X + ((5 - len(row)) * (KEYBOARD_COL_W // 2))
@@ -596,11 +603,11 @@ class MouseApp:
                 selected = row_index == self.keyboard_row and col_index == self.keyboard_col
                 self._draw_keyboard_cell(lcd, x, y, entry, selected)
 
-        draw_footer(lcd, "A key B page", GRAY)
+        draw_footer(lcd, self._keyboard_page_name() + " A key B page", GRAY)
         self._report_lcd(
             "USB ready",
             "kbd " + self._keyboard_page_name(),
-            "sel " + self._selected_key_name(),
+            "key " + self._selected_key_name(),
         )
 
     def _draw_hid_unavailable(self, lcd):
@@ -645,17 +652,13 @@ class MouseApp:
     def step(self, runtime):
         buttons = runtime.buttons
         lcd = runtime.lcd
-        suppress_actions = self._handle_mode_toggle(buttons)
+        center_action = self._handle_center_button(buttons, getattr(runtime, "now_ms", ticks_ms()))
+        suppress_actions = center_action in ("toggle", "hold")
 
         if self.input_mode == MODE_MOUSE:
-            if not suppress_actions and buttons.pressed("CENTER"):
+            if center_action == "short":
                 self._toggle_speed()
-            if suppress_actions:
-                self.mouse_buttons = 0
-                if self.mouse_hid is not None:
-                    self.mouse_hid.release_buttons()
-                self._reset_motion_state(getattr(runtime, "now_ms", ticks_ms()))
-            else:
+            if not suppress_actions:
                 self._update_mouse(buttons, self._movement_elapsed_ms(runtime))
         elif suppress_actions:
             pass
