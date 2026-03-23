@@ -224,12 +224,12 @@ class MouseApp:
             line3 = "close REPL tools"
             footer = "then reconnect USB"
         elif self.hid_detail == "usb.device missing":
-            line2 = "Flash MicroPython"
-            line3 = "with USB device"
-            footer = "support enabled"
+            line2 = "copy usb folder"
+            line3 = "or check firmware"
+            footer = "then reboot"
         elif self.hid_detail == "usb mouse pkg missing":
             line2 = "copy vendor folder"
-            line3 = "then reboot"
+            line3 = "plus usb folder"
             footer = "then reboot"
         elif self.hid_detail.startswith("init failed:"):
             line2 = fit_text(self.hid_detail, 19)
