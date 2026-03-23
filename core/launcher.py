@@ -6,7 +6,12 @@ from core.buttons import ButtonManager
 from core.boot_mode import DEFAULT_BOOT_MODE, detect_boot_mode
 from core.display import get_lcd, show_fatal_error
 from core.ui import center_x, fit_text
-from core.platform import sleep
+from core.platform import sleep, sleep_ms, ticks_add, ticks_diff, ticks_ms
+
+
+# Poll inputs and send HID reports more often than the LCD can be flushed.
+INPUT_POLL_MS = 5
+LCD_FLUSH_MS = 40
 
 
 class Mouseboard:
@@ -18,6 +23,7 @@ class Mouseboard:
         self.controller = None
         self.boot_mode = DEFAULT_BOOT_MODE
         self.error_stage = "boot"
+        self.now_ms = ticks_ms()
         self._boot_status = ""
         self._boot_detail = ""
         self._last_lcd_report = None
@@ -142,11 +148,16 @@ class Mouseboard:
         sleep(0.25)
         self.error_stage = "runtime"
         self.log("enter frame loop")
+        next_lcd_flush_ms = ticks_ms()
         while True:
-            self.buttons.update()
+            self.now_ms = ticks_ms()
+            self.buttons.update(self.now_ms)
             self.controller.step(self)
             if isinstance(self.controller, MouseApp) and self.controller.wants_debug_mode():
                 self._open_usb_diag(self.controller.debug_reason())
+                next_lcd_flush_ms = self.now_ms
                 continue
-            self.lcd.display()
-            sleep(0.03)
+            if ticks_diff(self.now_ms, next_lcd_flush_ms) >= 0:
+                self.lcd.display()
+                next_lcd_flush_ms = ticks_add(self.now_ms, LCD_FLUSH_MS)
+            sleep_ms(INPUT_POLL_MS)

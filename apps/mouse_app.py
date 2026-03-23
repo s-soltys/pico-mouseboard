@@ -1,17 +1,24 @@
 from lcd import BLACK, WHITE, GRAY, YELLOW, CYAN, GREEN, RED, TEAL
 from core.controls import A_LABEL, B_LABEL
 from core.hid import MouseController
-from core.platform import sleep_ms
+from core.platform import sleep_ms, ticks_diff, ticks_ms
 from core.ui import draw_header, draw_footer, fit_text
 
 
+# Motion speeds are accumulated over elapsed time so cursor velocity stays stable
+# even when the input loop runs faster than the LCD refresh. Each profile is
+# (label, base_pixels_per_second, max_pixels_per_second).
 SPEEDS = (
-    ("slow", 15),
-    ("fast", 30),
+    ("slow", 260, 520),
+    ("fast", 420, 860),
 )
 
 OPEN_RETRY_MS = 1200
 OPEN_RETRY_STEP_MS = 120
+MAX_MOTION_ELAPSED_MS = 40
+MAX_REPORT_DELTA = 8
+ACCEL_START_MS = 120
+ACCEL_RAMP_MS = 420
 
 MOVE_BOX_X = 4
 MOVE_BOX_Y = 14
@@ -39,6 +46,13 @@ class MouseApp:
         self.move_dy = 0
         self.mouse_buttons = 0
         self.speed_index = 0
+        self._last_motion_ms = None
+        self._move_error_x = 0.0
+        self._move_error_y = 0.0
+        self._move_dir_x = 0
+        self._move_dir_y = 0
+        self._move_hold_x_ms = 0
+        self._move_hold_y_ms = 0
 
     def _log(self, message):
         if self.runtime is not None and hasattr(self.runtime, "log"):
@@ -55,8 +69,72 @@ class MouseApp:
     def _speed_name(self):
         return SPEEDS[self.speed_index][0]
 
-    def _speed_step(self):
+    def _speed_base(self):
         return SPEEDS[self.speed_index][1]
+
+    def _speed_max(self):
+        return SPEEDS[self.speed_index][2]
+
+    def _reset_motion_state(self, now_ms=None):
+        self.move_dx = 0
+        self.move_dy = 0
+        self._last_motion_ms = now_ms
+        self._move_error_x = 0.0
+        self._move_error_y = 0.0
+        self._move_dir_x = 0
+        self._move_dir_y = 0
+        self._move_hold_x_ms = 0
+        self._move_hold_y_ms = 0
+
+    def _movement_elapsed_ms(self, runtime):
+        now_ms = getattr(runtime, "now_ms", ticks_ms())
+        if self._last_motion_ms is None:
+            self._last_motion_ms = now_ms
+            return 0
+
+        elapsed_ms = ticks_diff(now_ms, self._last_motion_ms)
+        self._last_motion_ms = now_ms
+        if elapsed_ms <= 0:
+            return 0
+        if elapsed_ms > MAX_MOTION_ELAPSED_MS:
+            return MAX_MOTION_ELAPSED_MS
+        return elapsed_ms
+
+    def _axis_dir(self, buttons, negative, positive):
+        direction = 0
+        if buttons.down(negative):
+            direction -= 1
+        if buttons.down(positive):
+            direction += 1
+        return direction
+
+    def _axis_speed(self, hold_ms):
+        base_speed = self._speed_base()
+        max_speed = self._speed_max()
+        if hold_ms <= ACCEL_START_MS:
+            return base_speed
+        ramp_ms = hold_ms - ACCEL_START_MS
+        if ramp_ms >= ACCEL_RAMP_MS:
+            return max_speed
+        return base_speed + ((max_speed - base_speed) * ramp_ms / ACCEL_RAMP_MS)
+
+    def _axis_delta(self, direction, elapsed_ms, residual, last_direction, hold_ms):
+        if direction == 0:
+            return 0, 0.0, 0, 0
+
+        if direction != last_direction:
+            residual = 0.0
+            hold_ms = 0
+
+        hold_ms += elapsed_ms
+        residual += direction * (self._axis_speed(hold_ms) * elapsed_ms / 1000.0)
+        delta = int(residual)
+        if delta > MAX_REPORT_DELTA:
+            delta = MAX_REPORT_DELTA
+        elif delta < -MAX_REPORT_DELTA:
+            delta = -MAX_REPORT_DELTA
+        residual -= delta
+        return delta, residual, direction, hold_ms
 
     def _signed(self, value):
         if value >= 0:
@@ -97,10 +175,9 @@ class MouseApp:
         self.usb_state = "boot"
         self.activity = "idle"
         self.hid_detail = ""
-        self.move_dx = 0
-        self.move_dy = 0
         self.mouse_buttons = 0
         self.speed_index = 0
+        self._reset_motion_state(getattr(runtime, "now_ms", ticks_ms()))
 
         self._set_boot_status("open USB", "generic mouse", CYAN)
         if not self._open_hid(OPEN_RETRY_MS):
@@ -118,22 +195,27 @@ class MouseApp:
 
     def _toggle_speed(self):
         self.speed_index = (self.speed_index + 1) % len(SPEEDS)
+        self._reset_motion_state(getattr(self.runtime, "now_ms", ticks_ms()))
         self.activity = self._speed_name()
         self._log("speed: " + self._speed_name())
 
-    def _update_mouse(self, buttons):
-        step = self._speed_step()
-        dx = 0
-        dy = 0
-
-        if buttons.down("LEFT"):
-            dx -= step
-        if buttons.down("RIGHT"):
-            dx += step
-        if buttons.down("UP"):
-            dy -= step
-        if buttons.down("DOWN"):
-            dy += step
+    def _update_mouse(self, buttons, elapsed_ms):
+        dir_x = self._axis_dir(buttons, "LEFT", "RIGHT")
+        dir_y = self._axis_dir(buttons, "UP", "DOWN")
+        dx, self._move_error_x, self._move_dir_x, self._move_hold_x_ms = self._axis_delta(
+            dir_x,
+            elapsed_ms,
+            self._move_error_x,
+            self._move_dir_x,
+            self._move_hold_x_ms,
+        )
+        dy, self._move_error_y, self._move_dir_y, self._move_hold_y_ms = self._axis_delta(
+            dir_y,
+            elapsed_ms,
+            self._move_error_y,
+            self._move_dir_y,
+            self._move_hold_y_ms,
+        )
 
         mouse_buttons = 0
         if buttons.down("A"):
@@ -259,7 +341,7 @@ class MouseApp:
         if buttons.pressed("CENTER"):
             self._toggle_speed()
 
-        self._update_mouse(buttons)
+        self._update_mouse(buttons, self._movement_elapsed_ms(runtime))
 
         lcd.fill(BLACK)
         if self.usb_state == "error":
